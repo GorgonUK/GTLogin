@@ -15,14 +15,13 @@
   <link rel="icon"
     href="https://s3.eu-west-1.amazonaws.com/cdn.growtopiagame.com/website/resources/assets/images/growtopia.ico"
     type="image/x-icon">
-  <!-- include bootstrap and custom  css -->
   <link media="all" rel="stylesheet"
     href="https://s3.eu-west-1.amazonaws.com/cdn.growtopiagame.com/website/resources/assets/css/faq-main.css">
-  <!-- include custom  css -->
   <link media="all" rel="stylesheet"
     href="https://s3.eu-west-1.amazonaws.com/cdn.growtopiagame.com/website/resources/assets/css/shop-custom.css">
   <link media="all" rel="stylesheet"
     href="https://s3.eu-west-1.amazonaws.com/cdn.growtopiagame.com/website/resources/assets/css/ingame-custom.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .modal-backdrop {
       background-color: rgba(0, 0, 0, 0.1) !important;
@@ -35,6 +34,41 @@
     .modal-body,
     .content {
       padding: 0;
+    }
+
+    .login-error {
+      color: #c0392b;
+      font-weight: 600;
+      margin: 8px 0 12px;
+      text-align: center;
+      display: none;
+    }
+
+    .login-error.visible {
+      display: block;
+    }
+
+    .auth-divider {
+      text-align: center;
+      margin: 12px 0;
+      color: #666;
+      font-size: 13px;
+    }
+
+    .google-box {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 12px;
+      min-height: 44px;
+    }
+
+    .google-growid-panel {
+      display: none;
+      margin-top: 8px;
+    }
+
+    .google-growid-panel.visible {
+      display: block;
     }
   </style>
 </head>
@@ -60,6 +94,39 @@
                             </div>
                             <div class="row div-content-center">
                               <div class="col-md-12 col-sm-12">
+                                <div id="loginError" class="login-error" role="alert"></div>
+
+                                <div id="googleSection">
+                                  <div class="google-box">
+                                    <div id="g_id_onload"
+                                      data-client_id="{{ google_client_id }}"
+                                      data-context="signin"
+                                      data-ux_mode="popup"
+                                      data-callback="onGoogleCredential"
+                                      data-auto_prompt="false">
+                                    </div>
+                                    <div class="g_id_signin"
+                                      data-type="standard"
+                                      data-shape="rectangular"
+                                      data-theme="outline"
+                                      data-text="continue_with"
+                                      data-size="large"
+                                      data-logo_alignment="left">
+                                    </div>
+                                  </div>
+                                  <div id="googleGrowIdPanel" class="google-growid-panel">
+                                    <p class="text-center" style="margin-bottom:8px;">Choose a GrowID for this Google account</p>
+                                    <div class="form-group">
+                                      <input id="google-growid" class="form-control grow-text" placeholder="Your Growtopia Name *"
+                                        type="text" pattern="[A-Za-z0-9]+" maxlength="18">
+                                    </div>
+                                    <div class="form-group text-center">
+                                      <button type="button" id="googleGrowIdSubmit" class="btn btn-lg btn-primary grow-button">Continue</button>
+                                    </div>
+                                  </div>
+                                  <div class="auth-divider">or</div>
+                                </div>
+
                                 <form method="POST" id="loginForm" action="/player/growid/login/validate"
                                   accept-charset="UTF-8" class="" role="form" autocomplete="off">
                                   <input name="_token" type="hidden" value="{{ data }}">
@@ -124,86 +191,201 @@
                         }
                       </style>
                       <script>
-                        document.addEventListener('DOMContentLoaded', function () {
-                          const loginForm = document.getElementById('loginForm');
-                          const registerForm = document.getElementById('registerForm');
-                          const toggleRegister = document.getElementById('toggleRegister');
-                          const toggleLogin = document.getElementById('toggleLogin');
-                          const sectionTitle = document.querySelector('.section-title h2');
+                        (function () {
+                          const clientToken = '{{ data }}';
+                          let pendingGoogleCredential = '';
 
-                          // @note toggle to register form
-                          toggleRegister.addEventListener('click', function (e) {
-                            e.preventDefault();
-                            loginForm.classList.add('hidden');
-                            registerForm.classList.remove('hidden');
-                            sectionTitle.textContent = 'Register your Grow ID';
-                          });
+                          function showError(message) {
+                            const el = document.getElementById('loginError');
+                            el.textContent = message || 'Login failed.';
+                            el.classList.add('visible');
+                          }
 
-                          // @note toggle to login form
-                          toggleLogin.addEventListener('click', function (e) {
-                            e.preventDefault();
-                            registerForm.classList.add('hidden');
-                            loginForm.classList.remove('hidden');
-                            sectionTitle.textContent = 'Log in with your Grow ID';
-                          });
+                          function clearError() {
+                            const el = document.getElementById('loginError');
+                            el.textContent = '';
+                            el.classList.remove('visible');
+                          }
 
-                          // @note login form handlers
-                          const loginSubmitButton = loginForm.querySelector('input[type="submit"]');
-                          const loginNameInput = document.getElementById('login-name');
-                          const passwordInput = document.getElementById('password');
+                          /** Deliver JSON the Growtopia WebView expects after AJAX validation. */
+                          function handTokenToClient(data) {
+                            document.open();
+                            document.write(JSON.stringify(data));
+                            document.close();
+                          }
 
-                          loginNameInput.addEventListener('input', function (e) {
-                            this.value = this.value.replace(/[^A-Za-z0-9]/g, '');
-                          });
-
-                          passwordInput.addEventListener('input', function (e) {
-                            this.value = this.value.replace(/[^A-Za-z0-9@._!\-]/g, '');
-                          });
-
-                          loginForm.addEventListener('submit', function (e) {
-                            if (loginSubmitButton.disabled) {
-                              e.preventDefault();
-                              return false;
+                          async function postForm(url, formData, submitButton, busyLabel) {
+                            clearError();
+                            const previous = submitButton.value;
+                            submitButton.disabled = true;
+                            submitButton.value = busyLabel;
+                            try {
+                              const res = await fetch(url, {
+                                method: 'POST',
+                                body: formData,
+                                credentials: 'same-origin',
+                              });
+                              const data = await res.json();
+                              if (data.status === 'success' && data.token) {
+                                handTokenToClient(data);
+                                return;
+                              }
+                              showError(data.message || 'Login failed.');
+                              submitButton.disabled = false;
+                              submitButton.value = previous;
+                            } catch (err) {
+                              showError('Network error. Please try again.');
+                              submitButton.disabled = false;
+                              submitButton.value = previous;
                             }
-                            loginSubmitButton.disabled = true;
-                            loginSubmitButton.value = 'Logging in...';
-                          });
+                          }
 
-                          // @note register form handlers
-                          const registerSubmitButton = registerForm.querySelector('input[type="submit"]');
-                          const registerNameInput = document.getElementById('register-name');
-                          const registerEmailInput = document.getElementById('register-email');
-                          const registerPasswordInput = document.getElementById('register-password');
-                          const registerConfirmPasswordInput = document.getElementById('register-confirm-password');
+                          async function completeGoogleLogin(growId) {
+                            clearError();
+                            const panel = document.getElementById('googleGrowIdPanel');
+                            const submit = document.getElementById('googleGrowIdSubmit');
+                            submit.disabled = true;
+                            submit.textContent = 'Signing in...';
+                            try {
+                              const body = new URLSearchParams();
+                              body.set('credential', pendingGoogleCredential);
+                              body.set('_token', clientToken);
+                              if (growId) body.set('growId', growId);
 
-                          registerNameInput.addEventListener('input', function (e) {
-                            this.value = this.value.replace(/[^A-Za-z0-9]/g, '');
-                          });
+                              const res = await fetch('/player/growid/login/google', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body,
+                                credentials: 'same-origin',
+                              });
+                              const data = await res.json();
 
-                          registerPasswordInput.addEventListener('input', function (e) {
-                            this.value = this.value.replace(/[^A-Za-z0-9@._!\-]/g, '');
-                          });
+                              if (data.status === 'need_growid') {
+                                panel.classList.add('visible');
+                                const input = document.getElementById('google-growid');
+                                if (!input.value && data.suggestedGrowId) input.value = data.suggestedGrowId;
+                                submit.disabled = false;
+                                submit.textContent = 'Continue';
+                                return;
+                              }
+                              if (data.status === 'success' && data.token) {
+                                handTokenToClient(data);
+                                return;
+                              }
+                              showError(data.message || 'Google Sign-In failed.');
+                              submit.disabled = false;
+                              submit.textContent = 'Continue';
+                            } catch (err) {
+                              showError('Network error during Google Sign-In.');
+                              submit.disabled = false;
+                              submit.textContent = 'Continue';
+                            }
+                          }
 
-                          registerConfirmPasswordInput.addEventListener('input', function (e) {
-                            this.value = this.value.replace(/[^A-Za-z0-9@._!\-]/g, '');
-                          });
+                          window.onGoogleCredential = function (response) {
+                            pendingGoogleCredential = response.credential;
+                            completeGoogleLogin('');
+                          };
 
-                          registerForm.addEventListener('submit', function (e) {
-                            if (registerSubmitButton.disabled) {
-                              e.preventDefault();
-                              return false;
+                          document.addEventListener('DOMContentLoaded', function () {
+                            const googleClientId = '{{ google_client_id }}';
+                            if (!googleClientId) {
+                              document.getElementById('googleSection').style.display = 'none';
                             }
 
-                            if (registerPasswordInput.value !== registerConfirmPasswordInput.value) {
-                              e.preventDefault();
-                              alert('Passwords do not match!');
-                              return false;
-                            }
+                            const loginForm = document.getElementById('loginForm');
+                            const registerForm = document.getElementById('registerForm');
+                            const toggleRegister = document.getElementById('toggleRegister');
+                            const toggleLogin = document.getElementById('toggleLogin');
+                            const sectionTitle = document.querySelector('.section-title h2');
 
-                            registerSubmitButton.disabled = true;
-                            registerSubmitButton.value = 'Registering...';
+                            toggleRegister.addEventListener('click', function (e) {
+                              e.preventDefault();
+                              clearError();
+                              loginForm.classList.add('hidden');
+                              registerForm.classList.remove('hidden');
+                              sectionTitle.textContent = 'Register your Grow ID';
+                            });
+
+                            toggleLogin.addEventListener('click', function (e) {
+                              e.preventDefault();
+                              clearError();
+                              registerForm.classList.add('hidden');
+                              loginForm.classList.remove('hidden');
+                              sectionTitle.textContent = 'Log in with your Grow ID';
+                            });
+
+                            const loginSubmitButton = loginForm.querySelector('input[type="submit"]');
+                            const loginNameInput = document.getElementById('login-name');
+                            const passwordInput = document.getElementById('password');
+
+                            loginNameInput.addEventListener('input', function () {
+                              this.value = this.value.replace(/[^A-Za-z0-9]/g, '');
+                            });
+
+                            passwordInput.addEventListener('input', function () {
+                              this.value = this.value.replace(/[^A-Za-z0-9@._!\-]/g, '');
+                            });
+
+                            loginForm.addEventListener('submit', function (e) {
+                              e.preventDefault();
+                              if (loginSubmitButton.disabled) return false;
+                              postForm(
+                                loginForm.action,
+                                new FormData(loginForm),
+                                loginSubmitButton,
+                                'Logging in...',
+                              );
+                            });
+
+                            const registerSubmitButton = registerForm.querySelector('input[type="submit"]');
+                            const registerNameInput = document.getElementById('register-name');
+                            const registerPasswordInput = document.getElementById('register-password');
+                            const registerConfirmPasswordInput = document.getElementById('register-confirm-password');
+
+                            registerNameInput.addEventListener('input', function () {
+                              this.value = this.value.replace(/[^A-Za-z0-9]/g, '');
+                            });
+
+                            registerPasswordInput.addEventListener('input', function () {
+                              this.value = this.value.replace(/[^A-Za-z0-9@._!\-]/g, '');
+                            });
+
+                            registerConfirmPasswordInput.addEventListener('input', function () {
+                              this.value = this.value.replace(/[^A-Za-z0-9@._!\-]/g, '');
+                            });
+
+                            registerForm.addEventListener('submit', function (e) {
+                              e.preventDefault();
+                              if (registerSubmitButton.disabled) return false;
+
+                              if (registerPasswordInput.value !== registerConfirmPasswordInput.value) {
+                                showError('Passwords do not match!');
+                                return false;
+                              }
+
+                              postForm(
+                                registerForm.action,
+                                new FormData(registerForm),
+                                registerSubmitButton,
+                                'Registering...',
+                              );
+                            });
+
+                            document.getElementById('google-growid').addEventListener('input', function () {
+                              this.value = this.value.replace(/[^A-Za-z0-9]/g, '');
+                            });
+
+                            document.getElementById('googleGrowIdSubmit').addEventListener('click', function () {
+                              const growId = document.getElementById('google-growid').value.trim();
+                              if (!growId) {
+                                showError('Enter a GrowID to continue.');
+                                return;
+                              }
+                              completeGoogleLogin(growId);
+                            });
                           });
-                        });
+                        })();
                       </script>
                     </div>
                   </div>
@@ -216,10 +398,8 @@
     </section>
   </div>
 </body>
-<!-- JQUERY LIBRARY -->
 <script
   src="https://s3.eu-west-1.amazonaws.com/cdn.growtopiagame.com/website/resources/assets/js/jquery-3.7.1.min.js"></script>
-<!-- boostrap javascript -->
 <script
   src="https://s3.eu-west-1.amazonaws.com/cdn.growtopiagame.com/website/resources/assets/js/bootstrap3.min.js"></script>
 <script>
@@ -253,7 +433,6 @@
     $('.close').on('click', function () {
       window.location = "https://login.growtopiagame.com/player/validate/close"
     });
-    // $('form').submit($('form .grow-button').attr('disabled', 'true'));
 
     var observer = new MutationObserver(function (mutations) {
       mutations.forEach(function (mutation) {
