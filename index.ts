@@ -11,14 +11,14 @@ import {
   findPeerByGrowId,
   linkGoogle,
   updatePeerPassword,
-} from './lib/db';
-import { googleConfigured, verifyGoogleCredential } from './lib/google';
+} from './lib/db.js';
+import { googleConfigured, verifyGoogleCredential } from './lib/google.js';
 import {
   passwordHash,
   passwordVerify,
   randomSessionPassword,
   suggestGrowIdFromEmail,
-} from './lib/password';
+} from './lib/password.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
