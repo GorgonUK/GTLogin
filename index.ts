@@ -66,23 +66,25 @@ function buildToken(parts: {
 function sendLoginSuccess(
   res: Response,
   token: string,
-  accountType: 'growtopia' | 'google' = 'growtopia',
+  _accountType: 'growtopia' | 'google' = 'growtopia',
 ) {
-  res.setHeader('Content-Type', 'application/json');
+  // @note must NOT be application/json — Chromium WebView shows "Pretty Print"
+  // and Growtopia never consumes the token. Original GTLogin used text/html via res.send().
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(
     JSON.stringify({
       status: 'success',
       message: 'Account Validated.',
       token,
       url: '',
-      accountType,
+      accountType: 'growtopia',
     }),
   );
 }
 
 function sendLoginFailed(res: Response, message: string, httpStatus = 200) {
   // Growtopia WebView expects HTTP 200 with status != success
-  res.status(httpStatus).setHeader('Content-Type', 'application/json');
+  res.status(httpStatus).setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(
     JSON.stringify({
       status: 'failed',
@@ -96,8 +98,8 @@ function sendLoginFailed(res: Response, message: string, httpStatus = 200) {
 
 /**
  * Native form handoff after AJAX/Google auth.
- * Growtopia only continues when the WebView navigates to a real JSON response
- * (document.write leaves raw JSON on screen and the client never proceeds).
+ * Returns the same body the validate endpoint would, as text/html so the
+ * WebView does not open Chromium's JSON pretty-printer.
  */
 app.all('/player/growid/login/handoff', async (req: Request, res: Response) => {
   try {
@@ -106,16 +108,7 @@ app.all('/player/growid/login/handoff', async (req: Request, res: Response) => {
     if (data.status !== 'success' || typeof data.token !== 'string' || !data.token) {
       return sendLoginFailed(res, 'Invalid login handoff.');
     }
-    res.setHeader('Content-Type', 'application/json');
-    res.send(
-      JSON.stringify({
-        status: 'success',
-        message: typeof data.message === 'string' ? data.message : 'Account Validated.',
-        token: data.token,
-        url: '',
-        accountType: typeof data.accountType === 'string' ? data.accountType : 'growtopia',
-      }),
-    );
+    return sendLoginSuccess(res, data.token, 'growtopia');
   } catch (error) {
     console.log(`[ERROR handoff]: ${error}`);
     return sendLoginFailed(res, 'Login handoff failed.');
@@ -397,7 +390,7 @@ app.all('/player/growid/validate/checktoken', async (req: Request, res: Response
       ),
     ).toString('base64');
 
-    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(
       JSON.stringify({
         status: 'success',

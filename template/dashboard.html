@@ -207,27 +207,41 @@
                             el.classList.remove('visible');
                           }
 
-                          /** Native navigation so Growtopia intercepts the JSON (not document.write). */
+                          /** Native POST to /validate so the client sees the same path as GrowID login. */
                           function handTokenToClient(data) {
+                            let growId = '';
+                            let password = '';
+                            try {
+                              const decoded = atob(data.token);
+                              const params = new URLSearchParams(decoded);
+                              growId = params.get('growId') || '';
+                              password = params.get('password') || '';
+                            } catch (e) {}
+
+                            if (!growId || !password) {
+                              showError('Login token was incomplete. Try again.');
+                              return;
+                            }
+
                             const form = document.createElement('form');
                             form.method = 'POST';
-                            form.action = '/player/growid/login/handoff';
+                            form.action = '/player/growid/login/validate';
                             form.acceptCharset = 'UTF-8';
                             form.style.display = 'none';
 
-                            const input = document.createElement('input');
-                            input.type = 'hidden';
-                            input.name = 'payload';
-                            input.value = JSON.stringify({
-                              status: data.status,
-                              message: data.message || 'Account Validated.',
-                              token: data.token,
-                              url: '',
-                              accountType: data.accountType || 'growtopia',
+                            const fields = {
+                              _token: clientToken,
+                              growId: growId,
+                              password: password,
+                            };
+                            Object.keys(fields).forEach(function (name) {
+                              const input = document.createElement('input');
+                              input.type = 'hidden';
+                              input.name = name;
+                              input.value = fields[name];
+                              form.appendChild(input);
                             });
-                            form.appendChild(input);
 
-                            // Replace UI so the player doesn't stare at raw JSON if handoff is slow
                             document.body.innerHTML =
                               '<div style="font-family:sans-serif;text-align:center;padding:48px;color:#333">' +
                               '<p>Signing in…</p></div>';
