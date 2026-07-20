@@ -207,11 +207,32 @@
                             el.classList.remove('visible');
                           }
 
-                          /** Deliver JSON the Growtopia WebView expects after AJAX validation. */
+                          /** Native navigation so Growtopia intercepts the JSON (not document.write). */
                           function handTokenToClient(data) {
-                            document.open();
-                            document.write(JSON.stringify(data));
-                            document.close();
+                            const form = document.createElement('form');
+                            form.method = 'POST';
+                            form.action = '/player/growid/login/handoff';
+                            form.acceptCharset = 'UTF-8';
+                            form.style.display = 'none';
+
+                            const input = document.createElement('input');
+                            input.type = 'hidden';
+                            input.name = 'payload';
+                            input.value = JSON.stringify({
+                              status: data.status,
+                              message: data.message || 'Account Validated.',
+                              token: data.token,
+                              url: '',
+                              accountType: data.accountType || 'growtopia',
+                            });
+                            form.appendChild(input);
+
+                            // Replace UI so the player doesn't stare at raw JSON if handoff is slow
+                            document.body.innerHTML =
+                              '<div style="font-family:sans-serif;text-align:center;padding:48px;color:#333">' +
+                              '<p>Signing in…</p></div>';
+                            document.body.appendChild(form);
+                            form.submit();
                           }
 
                           async function postForm(url, formData, submitButton, busyLabel) {

@@ -94,6 +94,34 @@ function sendLoginFailed(res: Response, message: string, httpStatus = 200) {
   );
 }
 
+/**
+ * Native form handoff after AJAX/Google auth.
+ * Growtopia only continues when the WebView navigates to a real JSON response
+ * (document.write leaves raw JSON on screen and the client never proceeds).
+ */
+app.all('/player/growid/login/handoff', async (req: Request, res: Response) => {
+  try {
+    const raw = (req.body as Record<string, string>)?.payload || '';
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    if (data.status !== 'success' || typeof data.token !== 'string' || !data.token) {
+      return sendLoginFailed(res, 'Invalid login handoff.');
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.send(
+      JSON.stringify({
+        status: 'success',
+        message: typeof data.message === 'string' ? data.message : 'Account Validated.',
+        token: data.token,
+        url: '',
+        accountType: typeof data.accountType === 'string' ? data.accountType : 'growtopia',
+      }),
+    );
+  } catch (error) {
+    console.log(`[ERROR handoff]: ${error}`);
+    return sendLoginFailed(res, 'Login handoff failed.');
+  }
+});
+
 app.get('/', (_req: Request, res: Response) => {
   res.send('Hello, world!');
 });
