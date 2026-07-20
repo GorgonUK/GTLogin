@@ -27,6 +27,7 @@ export function getPool(): Pool {
       database: process.env.MYSQL_DATABASE,
       waitForConnections: true,
       connectionLimit: 4,
+      connectTimeout: 8_000,
       enableKeepAlive: true,
       ssl: process.env.MYSQL_SSL === '1' ? { rejectUnauthorized: false } : undefined,
     });

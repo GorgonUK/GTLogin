@@ -264,6 +264,13 @@ app.all('/player/growid/login/google', async (req: Request, res: Response) => {
     return sendLoginSuccess(res, token, 'google');
   } catch (error) {
     console.log(`[ERROR google]: ${error}`);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/ETIMEDOUT|ECONNREFUSED|ENOTFOUND|connect/i.test(msg)) {
+      return sendLoginFailed(
+        res,
+        'Login server cannot reach the game database. Ask an admin to open MariaDB for Vercel.',
+      );
+    }
     return sendLoginFailed(res, 'Google Sign-In failed. Try again.');
   }
 });
