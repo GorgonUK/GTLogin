@@ -149,12 +149,17 @@ app.all('/player/login/dashboard', async (req: Request, res: Response) => {
 
 app.all('/player/growid/login/validate', async (req: Request, res: Response) => {
   try {
-    const formData = req.body as Record<string, string>;
+    const formData = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<
+      string,
+      string
+    >;
     const _token = formData._token || '';
     const growId = (formData.growId || '').trim();
     const password = formData.password || '';
     const email = (formData.email || '').trim();
-    const isRegister = Boolean(email);
+    // `reg=1` is set by the dashboard handoff after AJAX registration (no email on that POST).
+    const regHint = formData.reg === '1';
+    const isRegister = Boolean(email) || regHint;
 
     if (!growId || !password) {
       return sendLoginFailed(res, 'GrowID and password are required.');
@@ -170,7 +175,7 @@ app.all('/player/growid/login/validate', async (req: Request, res: Response) => 
         _token,
         growId,
         password,
-        email: isRegister ? email : undefined,
+        email: email || undefined,
         reg: isRegister ? 1 : 0,
       });
       return sendLoginSuccess(res, token);
@@ -180,13 +185,30 @@ app.all('/player/growid/login/validate', async (req: Request, res: Response) => 
 
     if (isRegister) {
       if (existing) {
-        return sendLoginFailed(res, 'That GrowID is already taken.');
+        // Fresh register form (has email) → name collision.
+        if (email) {
+          return sendLoginFailed(res, 'That GrowID is already taken.');
+        }
+        // Handoff after AJAX create: verify password and keep reg=1 so the game
+        // can still insert if it talks to a different MariaDB than GTLogin.
+        if (!existing.password || !passwordVerify(password, existing.password)) {
+          return sendLoginFailed(res, 'Incorrect password.');
+        }
+        const token = buildToken({ _token, growId, password, reg: 1 });
+        return sendLoginSuccess(res, token);
       }
-      if (!email.includes('@')) {
+      if (email && !email.includes('@')) {
         return sendLoginFailed(res, 'A valid email is required to register.');
       }
-      await createPeer(growId, passwordHash(password), email, null);
-      const token = buildToken({ _token, growId, password, email, reg: 1 });
+      // Handoff-only reg=1 with no row yet (DB lag / skipped AJAX create): still insert.
+      await createPeer(growId, passwordHash(password), email || null, null);
+      const token = buildToken({
+        _token,
+        growId,
+        password,
+        email: email || undefined,
+        reg: 1,
+      });
       return sendLoginSuccess(res, token);
     }
 
@@ -197,10 +219,20 @@ app.all('/player/growid/login/validate', async (req: Request, res: Response) => 
       return sendLoginFailed(res, 'Incorrect password.');
     }
 
-    const token = buildToken({ _token, growId, password, reg: 0 });
+    // reg=1: allow the game to provision a missing local row when GTLogin and
+    // Gurotopia do not share one MariaDB (Vercel→VPS vs local→127.0.0.1).
+    const token = buildToken({ _token, growId, password, reg: 1 });
     return sendLoginSuccess(res, token);
   } catch (error) {
     console.log(`[ERROR]: ${error}`);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/ETIMEDOUT|ECONNREFUSED|ENOTFOUND|connect|Server has gone away/i.test(msg)) {
+      return sendLoginFailed(
+        res,
+        'Login server cannot reach the game database. Try again in a moment.',
+        503,
+      );
+    }
     return sendLoginFailed(res, 'Internal Server Error', 500);
   }
 });
@@ -275,12 +307,15 @@ app.all('/player/growid/login/google', async (req: Request, res: Response) => {
       return sendLoginFailed(res, 'Could not create Google-linked account.');
     }
 
+    // reg=1 so the game can create the peer if GTLogin's MariaDB and the game
+    // server's MariaDB differ (common when Vercel points at the VPS and local
+    // Gurotopia uses 127.0.0.1). Password was already verified above.
     const token = buildToken({
       _token,
       growId: peer.growid,
       password: sessionPassword,
       email: identity.email || undefined,
-      reg: 0,
+      reg: 1,
     });
     return sendLoginSuccess(res, token, 'google');
   } catch (error) {
